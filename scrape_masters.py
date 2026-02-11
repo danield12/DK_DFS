@@ -54,7 +54,7 @@ HOLE_AZIMUTHS = {
     9: 127.36,
     10: 189.03,
     11: 217.79,
-    12: 45.0,  # Corrected manually (plays NE across Rae's Creek)
+    12: 209.46,
     13: 333.37,
     14: 91.51,
     15: 286.74,
