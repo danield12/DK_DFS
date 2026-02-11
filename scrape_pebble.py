@@ -296,6 +296,62 @@ def generate_visualizations(df):
     plt.tight_layout()
     plt.savefig("bogey_worse_heatmap.png")
 
+    # 5. Wind Impact Correlations
+    # Correlate Headwind (Tailwind = Negative) and Crosswind with Birdie/Bogey Pct per Hole
+
+    correlations = []
+
+    for hole, group in df.groupby('Hole'):
+        # Headwind (Tailwind is negative Headwind)
+        # Correlation: Higher Tailwind (more negative Headwind) -> Higher Birdie %?
+        # Expect negative correlation between Headwind and Birdie %
+        corr_head_birdie = group['Headwind_Comp'].corr(group['Birdie_Better_Pct'])
+        corr_head_bogey = group['Headwind_Comp'].corr(group['Bogey_Worse_Pct'])
+
+        # Crosswind
+        # Expect positive correlation between Crosswind and Bogey %?
+        corr_cross_birdie = group['Crosswind_Comp'].corr(group['Birdie_Better_Pct'])
+        corr_cross_bogey = group['Crosswind_Comp'].corr(group['Bogey_Worse_Pct'])
+
+        correlations.append({
+            'Hole': hole,
+            'Headwind_Birdie_Corr': corr_head_birdie,
+            'Headwind_Bogey_Corr': corr_head_bogey,
+            'Crosswind_Birdie_Corr': corr_cross_birdie,
+            'Crosswind_Bogey_Corr': corr_cross_bogey
+        })
+
+    df_corr = pd.DataFrame(correlations).set_index('Hole')
+
+    # Heatmap: Tailwind Impact (Negative Headwind Correlation)
+    # If Corr is negative, it means Higher Headwind -> Lower Birdie % (Or Higher Tailwind -> Higher Birdie %)
+    # Let's plot the raw correlation coefficients
+
+    plt.figure(figsize=(14, 6))
+    sns.heatmap(df_corr[['Headwind_Birdie_Corr', 'Headwind_Bogey_Corr']].T, cmap="coolwarm", center=0, annot=True, fmt=".2f")
+    plt.title("Correlation: Headwind Component vs Scoring (Negative = Tailwind Benefit)")
+    plt.xlabel("Hole Number")
+    plt.tight_layout()
+    plt.savefig("headwind_impact_correlation.png")
+
+    plt.figure(figsize=(14, 6))
+    sns.heatmap(df_corr[['Crosswind_Birdie_Corr', 'Crosswind_Bogey_Corr']].T, cmap="coolwarm", center=0, annot=True, fmt=".2f")
+    plt.title("Correlation: Crosswind Component vs Scoring")
+    plt.xlabel("Hole Number")
+    plt.tight_layout()
+    plt.savefig("crosswind_impact_correlation.png")
+
+    # 6. Hole Location Impact (Proxy: Normalized Deviation)
+    # Assuming residual deviation after accounting for weather/course average is largely due to pin difficulty.
+    plt.figure(figsize=(14, 8))
+    sns.heatmap(pivot_norm, cmap="RdBu_r", center=0, annot=True, fmt=".2f",
+                cbar_kws={'label': 'Deviation (Pin Difficulty Proxy)'})
+    plt.title("Hole Difficulty Variation (Pin Difficulty Proxy)\n(Residual Score Deviation after Weather Adjustment)")
+    plt.xlabel("Hole Number")
+    plt.ylabel("Round")
+    plt.tight_layout()
+    plt.savefig("hole_location_impact_proxy.png")
+
     print("Saved all visualizations.")
 
 if __name__ == "__main__":
