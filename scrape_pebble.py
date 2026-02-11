@@ -18,18 +18,18 @@ BASE_URL = "https://www.pgatour.com/tournaments/{year}/{tournament_name}/R{year}
 # Refined Weather Data (KMRY - Monterey Regional Airport)
 # Wind_Dir_Deg: 0=N, 90=E, 180=S, 270=W
 # Note: Wind speeds are average "golf day" sustained winds.
-WEATHER_CSV = """Year,Round,Wind_mph,Temp_F,Condition_Index,Wind_Dir_Deg
-2023,1,10,60,1,290
-2023,2,12,58,2,270
-2023,3,25,55,1,160
-2023,4,15,52,3,290
-2024,1,20,59,3,160
-2024,2,20,56,3,160
-2024,3,8,55,2,250
-2025,1,8,53,1,315
-2025,2,8,55,1,315
-2025,3,18,57,3,180
-2025,4,15,55,3,200"""
+WEATHER_CSV = """Year,Round,Wind_mph,Temp_F,Wind_Dir_Deg
+2023,1,10,60,290
+2023,2,12,58,270
+2023,3,25,55,160
+2023,4,15,52,290
+2024,1,20,59,160
+2024,2,20,56,160
+2024,3,8,55,250
+2025,1,8,53,315
+2025,2,8,55,315
+2025,3,18,57,180
+2025,4,15,55,200"""
 
 # Precise Azimuths (Tee -> Green Direction in Degrees)
 # Derived from ProVisualizer KML data
@@ -247,7 +247,8 @@ def generate_visualizations(df):
     if df.empty:
         return
 
-    df['Year_Round'] = df['Year'].astype(str) + " - R" + df['Round'].astype(str)
+    # Append Wind Speed to the Label for Clarity
+    df['Year_Round'] = df['Year'].astype(str) + " - R" + df['Round'].astype(str) + " (" + df['Wind_mph'].astype(str) + " mph)"
 
     # 1. Original Rel Score Heatmap (Raw Difficulty)
     pivot_raw = df.pivot(index="Year_Round", columns="Hole", values="Rel_Score")
