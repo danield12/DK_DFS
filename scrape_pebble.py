@@ -31,26 +31,27 @@ WEATHER_CSV = """Year,Round,Wind_mph,Temp_F,Condition_Index,Wind_Dir_Deg
 2025,3,18,57,3,180
 2025,4,15,55,3,200"""
 
-# Estimated Hole Azimuths (Tee -> Green Direction in Degrees)
+# Precise Azimuths (Tee -> Green Direction in Degrees)
+# Derived from ProVisualizer KML data
 HOLE_AZIMUTHS = {
-    1: 110,  # Inland East
-    2: 290,  # Back West
-    3: 270,  # West
-    4: 180,  # South along ocean
-    5: 0,    # North uphill
-    6: 180,  # South along ocean
-    7: 180,  # South downhill to ocean
-    8: 180,  # South along cliff
-    9: 180,  # South along cliff
-    10: 180, # South along cliff
-    11: 45,  # Northeast inland
-    12: 270, # West par 3
-    13: 0,   # North
-    14: 90,  # East par 5
-    15: 180, # South
-    16: 270, # West
-    17: 270, # West to ocean
-    18: 340  # Northwest along ocean
+    1: 65.95,
+    2: 100.86,
+    3: 236.83,
+    4: 115.76,
+    5: 141.19,
+    6: 203.78,
+    7: 175.93,
+    8: 58.70,
+    9: 134.73,
+    10: 157.03,
+    11: 23.85,
+    12: 287.27,
+    13: 304.60,
+    14: 337.92,
+    15: 309.07,
+    16: 236.08,
+    17: 205.55,
+    18: 299.62
 }
 
 def load_weather_data():
