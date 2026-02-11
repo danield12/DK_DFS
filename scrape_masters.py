@@ -11,58 +11,94 @@ import io
 import numpy as np
 
 # Constants
-YEARS = [2021, 2022, 2023, 2024]
+YEARS = [2020, 2021, 2022, 2023, 2024]
 TOURNAMENT_NAME = "masters-tournament"
 # URL for Masters often uses R{year}014. Verified for 2024.
 BASE_URL = "https://www.pgatour.com/tournaments/{year}/{tournament_name}/R{year}014/course-stats"
 
-# Weather Data (KAGS - Augusta Regional Airport / Reported Conditions)
-# Approximate values based on historical reports.
-# Wind_Dir_Deg: 0=N, 90=E, 180=S, 270=W
-WEATHER_CSV = """Year,Round,Wind_mph,Temp_F,Wind_Dir_Deg
-2021,1,10,80,225
-2021,2,12,82,225
-2021,3,15,75,270
-2021,4,8,78,270
-2022,1,15,72,270
-2022,2,20,65,270
-2022,3,15,50,315
-2022,4,10,70,270
-2023,1,10,85,180
-2023,2,15,75,225
-2023,3,20,48,45
-2023,4,10,65,315
-2024,1,20,79,200
-2024,2,18,72,270
-2024,3,10,78,290
-2024,4,10,84,250"""
+# Weather Data (User Provided)
+# Note: Wind_mph contains ranges. We will parse this to average.
+# Wind_Dir needs to be mapped to degrees.
+WEATHER_CSV = """Year,Round,Date,Wind_mph,Gusts_mph,Temp_High_F,Wind_Dir,Conditions
+2024,1,2024-04-11,15-20,35,78,S/SW,Delayed start (rain); Windy afternoon
+2024,2,2024-04-12,15-20,35,73,W/NW,Sunny but very windy; Difficult scoring
+2024,3,2024-04-13,7-15,20,78,W/NW,Sunny and warm; Calmer winds
+2024,4,2024-04-14,7-15,17,84,SW,Warm and sunny; Ideal finishing conditions
+2023,1,2023-04-06,5-10,12,85,S/SW,Hot and humid; Good scoring
+2023,2,2023-04-07,10-15,25,75,NE,Rain and storms; Play suspended; Temp dropped
+2023,3,2023-04-08,12-18,25,48,NE,Cold; Heavy rain; Play suspended
+2023,4,2023-04-09,10-15,20,62,NE,Cool and cloudy; Clearing late
+2022,1,2022-04-07,10-15,20,73,W,Sunny; Breezy
+2022,2,2022-04-08,15-20,30,67,SW/W,Windy and cooler; Tough conditions
+2022,3,2022-04-09,10-15,20,54,W,Cold; Feels like 40s; Windy
+2022,4,2022-04-10,5-10,15,73,SW,Sunny; Warmer; Pleasant finish
+2021,1,2021-04-08,10-12,15,81,SSW,Warm; Overcast; Firm conditions
+2021,2,2021-04-09,8-10,12,80,S,Scattered storms; Softening course
+2021,3,2021-04-10,10-15,25,82,S,Storms suspended play; Humid
+2021,4,2021-04-11,10-13,15,79,WSW,Sunny; Drying out
+2020,1,2020-11-12,5-10,12,78,E/NE,Delayed (rain); Soft conditions; Warm for Nov
+2020,2,2020-11-13,5-10,10,79,NE,Overcast; calm; Soft greens
+2020,3,2020-11-14,5-10,12,76,N/NE,Sunny; Perfect scoring conditions
+2020,4,2020-11-15,10-15,20,81,SW,Wind picked up slightly; Warm finish."""
 
-# Precise Azimuths (Tee -> Green Direction in Degrees) - Estimated for Augusta National
+# Precise Azimuths (Tee -> Green Direction in Degrees) - Calculated from ProVisualizer Coordinates
 HOLE_AZIMUTHS = {
-    1: 45.0,   # Tea Olive - Slight dogleg right, generally NE
-    2: 135.0,  # Pink Dogwood - Dogleg left, generally SE
-    3: 270.0,  # Flowering Peach - West
-    4: 0.0,    # Flowering Crab Apple - North (downhill)
-    5: 270.0,  # Magnolia - Dogleg left, generally West
-    6: 90.0,   # Juniper - Downhill East
-    7: 270.0,  # Pampas - Straight West
-    8: 90.0,   # Yellow Jasmine - Uphill East
-    9: 270.0,  # Carolina Cherry - Dogleg left, generally West
-    10: 225.0, # Camellia - Long downhill, SW
-    11: 315.0, # White Dogwood - Downhill, NW
-    12: 45.0,  # Golden Bell - Across Rae's Creek, NE
-    13: 270.0, # Azalea - Dogleg left, West
-    14: 0.0,   # Chinese Fir - Uphill, North
-    15: 135.0, # Firethorn - Downhill, SE
-    16: 45.0,  # Redbud - Across pond, NE
-    17: 270.0, # Nandina - West
-    18: 0.0    # Holly - Uphill, North
+    1: 304.78,
+    2: 172.65,
+    3: 311.34,
+    4: 264.78,
+    5: 166.99,
+    6: 14.03,
+    7: 112.81,
+    8: 346.02,
+    9: 127.36,
+    10: 189.03,
+    11: 217.79,
+    12: 45.0,  # Corrected manually (plays NE across Rae's Creek)
+    13: 333.37,
+    14: 91.51,
+    15: 286.74,
+    16: 335.94,
+    17: 106.79,
+    18: 14.8,
 }
 
 PIN_LOCATIONS_FILE = "masters_pin_locations.csv"
 
+def parse_wind_speed(wind_str):
+    if '-' in str(wind_str):
+        parts = wind_str.split('-')
+        try:
+            return (float(parts[0]) + float(parts[1])) / 2
+        except:
+            return float(parts[0])
+    try:
+        return float(wind_str)
+    except:
+        return 0.0
+
+def parse_wind_dir(dir_str):
+    mapping = {
+        'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
+        'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
+        'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
+        'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
+    }
+    # Handle composites like S/SW -> Average
+    if '/' in dir_str:
+        parts = dir_str.split('/')
+        angles = [mapping.get(p.strip(), 0) for p in parts]
+        # Circular mean not strictly needed for these small diffs usually
+        return np.mean(angles)
+    return mapping.get(dir_str.strip(), 0)
+
 def load_weather_data():
-    return pd.read_csv(io.StringIO(WEATHER_CSV))
+    df = pd.read_csv(io.StringIO(WEATHER_CSV))
+    # Parse Wind Speed (avg of range)
+    df['Wind_mph_Avg'] = df['Wind_mph'].apply(parse_wind_speed)
+    # Parse Wind Direction
+    df['Wind_Dir_Deg'] = df['Wind_Dir'].apply(parse_wind_dir)
+    return df
 
 def load_pin_locations():
     if os.path.exists(PIN_LOCATIONS_FILE):
@@ -133,7 +169,8 @@ async def fetch_and_parse_rounds(year):
                 btn = buttons_map[r_num]
                 print(f"  Clicking Round {r_num}...")
                 await btn.click()
-                time.sleep(3)
+                # Use asyncio.sleep to avoid blocking the event loop
+                await asyncio.sleep(3)
 
                 content = await page.content()
                 if "Augusta National Golf Club" not in content:
@@ -208,9 +245,9 @@ def calculate_wind_components(df):
     df['Angle_Diff_Rad'] = np.radians(df['Wind_Dir_Deg'] - df['Hole_Azimuth'])
 
     # Headwind: Positive = Into Wind, Negative = Downwind
-    df['Headwind_Comp'] = df['Wind_mph'] * np.cos(df['Angle_Diff_Rad'])
+    df['Headwind_Comp'] = df['Wind_mph_Avg'] * np.cos(df['Angle_Diff_Rad'])
     # Crosswind: Absolute value
-    df['Crosswind_Comp'] = df['Wind_mph'] * np.abs(np.sin(df['Angle_Diff_Rad']))
+    df['Crosswind_Comp'] = df['Wind_mph_Avg'] * np.abs(np.sin(df['Angle_Diff_Rad']))
 
     return df
 
@@ -275,6 +312,8 @@ def analyze_pin_locations(df, pin_df):
 
     # Calculate Magnitude Increase per Pin Group per Hole
     results = []
+    # User Note: "do not assume all pin locations in the same quadrant are the same"
+    # Grouping strictly by the string provided in Pin_Location column
     for (hole, pin_loc), group in df_pins.groupby(['Hole', 'Pin_Location']):
         avg_birdie = group['Birdie_Better_Pct'].mean()
         avg_bogey = group['Bogey_Worse_Pct'].mean()
@@ -344,7 +383,8 @@ def generate_visualizations(df, pin_stats):
         return
 
     # Append Wind Speed to the Label for Clarity
-    df['Year_Round'] = df['Year'].astype(str) + " - R" + df['Round'].astype(str) + " (" + df['Wind_mph'].astype(str) + " mph)"
+    # Using Wind_mph_Avg
+    df['Year_Round'] = df['Year'].astype(str) + " - R" + df['Round'].astype(str) + " (" + df['Wind_mph_Avg'].astype(str) + " mph)"
 
     # --- Helper to calculate relative wind arrow ---
     def get_arrow(row):
