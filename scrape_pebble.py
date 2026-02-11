@@ -308,22 +308,28 @@ def generate_visualizations(df):
     plt.savefig("normalized_scoring_heatmap.png")
 
     # 3. Birdie or Better % Heatmap
+    df['Annot_Label_Birdie'] = df['Birdie_Better_Pct'].round(1).astype(str) + "\n" + df['Wind_Arrow']
     pivot_birdie = df.pivot(index="Year_Round", columns="Hole", values="Birdie_Better_Pct")
+    pivot_annot_birdie = df.pivot(index="Year_Round", columns="Hole", values="Annot_Label_Birdie")
+
     plt.figure(figsize=(14, 8))
-    sns.heatmap(pivot_birdie, cmap="Greens", annot=True, fmt=".1f",
+    sns.heatmap(pivot_birdie, cmap="Greens", annot=pivot_annot_birdie, fmt="",
                 cbar_kws={'label': 'Birdie or Better %'})
-    plt.title("Birdie or Better Percentage by Round")
+    plt.title("Birdie or Better Percentage by Round\n(Arrows indicate wind push: ↑ = Tailwind, ↓ = Headwind)")
     plt.xlabel("Hole Number")
     plt.ylabel("Round")
     plt.tight_layout()
     plt.savefig("birdie_better_heatmap.png")
 
     # 4. Bogey or Worse % Heatmap
+    df['Annot_Label_Bogey'] = df['Bogey_Worse_Pct'].round(1).astype(str) + "\n" + df['Wind_Arrow']
     pivot_bogey = df.pivot(index="Year_Round", columns="Hole", values="Bogey_Worse_Pct")
+    pivot_annot_bogey = df.pivot(index="Year_Round", columns="Hole", values="Annot_Label_Bogey")
+
     plt.figure(figsize=(14, 8))
-    sns.heatmap(pivot_bogey, cmap="Reds", annot=True, fmt=".1f",
+    sns.heatmap(pivot_bogey, cmap="Reds", annot=pivot_annot_bogey, fmt="",
                 cbar_kws={'label': 'Bogey or Worse %'})
-    plt.title("Bogey or Worse Percentage by Round")
+    plt.title("Bogey or Worse Percentage by Round\n(Arrows indicate wind push: ↑ = Tailwind, ↓ = Headwind)")
     plt.xlabel("Hole Number")
     plt.ylabel("Round")
     plt.tight_layout()
