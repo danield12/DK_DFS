@@ -1,20 +1,21 @@
 # AT&T Pebble Beach Pro-Am Scoring & Weather Analysis
 
-This project scrapes **round-level** hole-by-hole scoring data for the **Pebble Beach Golf Links** course from the **AT&T Pebble Beach Pro-Am** tournament (2023, 2024, 2025) and integrates historical weather data (including Wind Direction) to analyze the impact of conditions on scoring.
+This project scrapes **round-level** hole-by-hole scoring data for the **Pebble Beach Golf Links** course from the **AT&T Pebble Beach Pro-Am** tournament (2023, 2024, 2025) and integrates robust historical weather data to analyze the impact of conditions on scoring.
 
 ## Data Source
-- **Scoring Data:** Scraped from [PGATour.com](https://www.pgatour.com) using `playwright` to interact with the Next.js application, select the correct course, and iterate through each round's data table.
-- **Weather Data:** Manually researched and integrated for each round (Wind Speed, Temperature, Condition Index, Wind Direction).
-- **Course Data:** Estimated Hole Azimuths (Tee-to-Green direction) for vector analysis.
+- **Scoring Data:** Scraped from [PGATour.com](https://www.pgatour.com) using `playwright` to interact with the Next.js application.
+- **Weather Data:** Sourced from **Monterey Regional Airport (KMRY)** historical records (via Aviation Weather/WeatherSpark) for the specific dates and hours of play.
+- **Course Data:** Estimated Hole Azimuths (Tee-to-Green direction) for wind vector analysis.
 
 ## Files
-- `scrape_pebble.py`: Main script to scrape data, merge weather, calculate wind vectors, and generate visualizations.
-- `pebble_beach_scoring_history.csv`: Aggregated scoring data including weather metrics.
-  - New Columns: `Wind_Dir_Deg`, `Hole_Azimuth`, `Headwind_Comp` (Positive = Headwind, Negative = Tailwind), `Crosswind_Comp` (Absolute lateral wind).
-- `scoring_fluctuation_heatmap.png`: Heatmap visualizing the fluctuation of average scores relative to par across rounds.
-- `headwind_impact.png`: Scatter plot showing impact of Headwind/Tailwind on scoring.
-- `crosswind_impact.png`: Scatter plot showing impact of Crosswind on scoring.
-- `wind_vs_score.png`: Scatter plot showing impact of Total Wind Speed on scoring.
+- `scrape_pebble.py`: Main script to scrape data, merge weather, calculate vectors, and generate visualizations.
+- `pebble_beach_scoring_history.csv`: Aggregated scoring data including:
+  - `Headwind_Comp`: Positive = Into Wind, Negative = Downwind.
+  - `Crosswind_Comp`: Absolute lateral wind component.
+  - `Normalized_Deviation`: Deviation of hole score from expected (adjusted for hole avg and course day difficulty).
+- `normalized_scoring_heatmap.png`: Heatmap showing which holes played easier/harder than expected relative to "normal".
+- `birdie_better_heatmap.png`: % of Birdie or Better scores per hole/round.
+- `bogey_worse_heatmap.png`: % of Bogey or Worse scores per hole/round.
 - `requirements.txt`: Python dependencies.
 
 ## Usage
@@ -30,10 +31,7 @@ This project scrapes **round-level** hole-by-hole scoring data for the **Pebble 
    python scrape_pebble.py
    ```
 
-3. **Output:**
-   - The script will generate the CSV and PNG files listed above.
-   - It will also print a correlation matrix to the console.
-
 ## Methodology
-- **Vector Analysis:** Wind is decomposed into Headwind (Parallel to hole) and Crosswind (Perpendicular to hole) components using the estimated azimuth of each hole.
-- **Condition Index:** A simple metric (1=Dry, 2=Damp, 3=Wet) used to categorize course softness based on historical weather reports.
+- **Normalization:** `Deviation = (Hole_Round_Avg - Hole_All_Time_Avg) - (Course_Round_Avg - Global_Course_Avg)`. This highlights if a hole played uniquely easy/hard compared to the field's performance that day.
+- **Wind Vectors:** Calculated using `Wind_Speed * cos(Wind_Dir - Hole_Dir)` for headwind.
+- **Robustness:** Weather data ensures non-zero wind speeds based on airport observations during play hours.

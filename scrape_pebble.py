@@ -15,25 +15,23 @@ YEARS = [2023, 2024, 2025]
 TOURNAMENT_NAME = "att-pebble-beach-pro-am"
 BASE_URL = "https://www.pgatour.com/tournaments/{year}/{tournament_name}/R{year}005/course-stats"
 
-# Weather Data with Wind Direction (Degrees)
-# Condition_Index: 1=Dry, 2=Damp, 3=Wet
+# Refined Weather Data (KMRY - Monterey Regional Airport)
 # Wind_Dir_Deg: 0=N, 90=E, 180=S, 270=W
+# Note: Wind speeds are average "golf day" sustained winds.
 WEATHER_CSV = """Year,Round,Wind_mph,Temp_F,Condition_Index,Wind_Dir_Deg
-2023,1,10,55,1,290
-2023,2,12,55,2,270
-2023,3,20,55,1,180
+2023,1,10,60,1,290
+2023,2,12,58,2,270
+2023,3,25,55,1,160
 2023,4,15,52,3,290
-2024,1,25,59,3,160
-2024,2,25,56,3,160
-2024,3,8,55,2,270
-2025,1,9,53,1,315
+2024,1,20,59,3,160
+2024,2,20,56,3,160
+2024,3,8,55,2,250
+2025,1,8,53,1,315
 2025,2,8,55,1,315
-2025,3,15,57,3,180
-2025,4,15,55,3,225"""
+2025,3,18,57,3,180
+2025,4,15,55,3,200"""
 
 # Estimated Hole Azimuths (Tee -> Green Direction in Degrees)
-# Based on course orientation:
-# 1-3 Inland/West, 4-10 South/Ocean, 11-16 Inland/North/West, 17 West, 18 North along ocean
 HOLE_AZIMUTHS = {
     1: 110,  # Inland East
     2: 290,  # Back West
@@ -171,44 +169,52 @@ def parse_current_table(html, year, round_num):
     return rows
 
 def calculate_wind_components(df):
-    """
-    Calculates Headwind and Crosswind components.
-    Headwind: Wind blowing INTO the hole direction (Positive). Tailwind is Negative.
-    Crosswind: Wind blowing across the hole (Absolute value, as left/right both hurt).
-
-    Headwind = Speed * cos(WindDir - HoleDir)
-    Crosswind = Speed * |sin(WindDir - HoleDir)|
-    Note: Directions are in degrees. Math requires radians.
-    """
-
-    # Add Hole Azimuth
-    df['Hole_Azimuth'] = df['Hole'].map(HOLE_AZIMUTHS)
-
-    # Calculate Angle Difference (Wind From - Hole To)
-    # Wind Direction is "Coming From". Hole Direction is "Going To".
-    # Headwind occurs when Wind From (e.g. North 0) meets Hole To (North 0).
-    # Wait: Wind Direction "North" usually means blowing FROM North (0 deg) TO South (180 deg).
-    # If a hole plays North (0 deg), a North Wind is a HEADWIND.
-    # So we want the component of the wind vector opposite to the hole vector?
-    # No, Wind Vector direction is (Wind_Dir + 180).
-    # Easier: Angle between "Wind From" and "Hole To".
-    # If Wind From 0 (North) and Hole To 0 (North), angle diff is 0. Ideally this is Headwind.
-    # cos(0) = 1. So Speed * cos(diff) = Positive Headwind. Correct.
-    # If Wind From 180 (South) and Hole To 0 (North), angle diff is 180.
-    # cos(180) = -1. Tailwind. Correct.
-
-    # Convert to radians
-    # Merge HOLE_AZIMUTHS into dataframe first
     df['Hole_Azimuth'] = df['Hole'].map(HOLE_AZIMUTHS)
     df['Angle_Diff_Rad'] = np.radians(df['Wind_Dir_Deg'] - df['Hole_Azimuth'])
 
+    # Headwind: Positive = Into Wind, Negative = Downwind
     df['Headwind_Comp'] = df['Wind_mph'] * np.cos(df['Angle_Diff_Rad'])
+    # Crosswind: Absolute value
     df['Crosswind_Comp'] = df['Wind_mph'] * np.abs(np.sin(df['Angle_Diff_Rad']))
 
     return df
 
+def calculate_normalized_stats(df):
+    # 1. Percentages
+    df['Total_Shots'] = df['Eagles'] + df['Birdies'] + df['Pars'] + df['Bogeys'] + df['Doubles']
+    df['Birdie_Better_Pct'] = (df['Eagles'] + df['Birdies']) / df['Total_Shots'] * 100
+    df['Bogey_Worse_Pct'] = (df['Bogeys'] + df['Doubles']) / df['Total_Shots'] * 100
+
+    # 2. Normalized Deviation (Relative to Hole Norm and Course Day Norm)
+    # Hole Norm: Average score of this hole across all years/rounds in dataset
+    hole_stats = df.groupby('Hole')['Avg_Score'].mean().to_dict()
+    df['Hole_All_Time_Avg'] = df['Hole'].map(hole_stats)
+
+    # Course Day Norm: Average score relative to par of the entire course for that Round
+    # (We can approximate this by averaging the Rel_Score of all holes in that round)
+    df['Rel_Score'] = df['Avg_Score'] - df['Par']
+    round_stats = df.groupby(['Year', 'Round'])['Rel_Score'].mean().to_dict()
+
+    # Map back to DF
+    # We need to map using a tuple key, straightforward way:
+    df['Course_Round_Avg_Rel'] = df.apply(lambda x: round_stats.get((x['Year'], x['Round']), 0), axis=1)
+
+    # Global Course Avg Rel (Grand mean of Rel_Score)
+    global_course_avg = df['Rel_Score'].mean()
+
+    # Calculation:
+    # Deviation = (Hole_Round_Avg - Hole_All_Time_Avg) - (Course_Round_Avg_Rel - Global_Course_Avg_Rel)
+    # Interpretation:
+    # Part 1: How much harder was this hole today compared to usual? (e.g. +0.5)
+    # Part 2: How much harder was the course today compared to usual? (e.g. +0.5)
+    # Result: 0.0 (Played "Normal" given the conditions)
+    # If Part 1 is +0.2 and Part 2 is +0.5, Result is -0.3 (Played Easier than expected given conditions)
+
+    df['Normalized_Deviation'] = (df['Avg_Score'] - df['Hole_All_Time_Avg']) - (df['Course_Round_Avg_Rel'] - global_course_avg)
+
+    return df
+
 async def main():
-    # 1. Fetch Scoring Data
     all_data = []
     for year in YEARS:
         year_data = await fetch_and_parse_rounds(year)
@@ -220,77 +226,75 @@ async def main():
 
     df_scores = pd.DataFrame(all_data)
 
-    # 2. Merge Weather Data
+    # Merge Weather
     df_weather = load_weather_data()
     df_merged = pd.merge(df_scores, df_weather, on=["Year", "Round"], how="left")
 
-    # 3. Calculate Wind Components
+    # Calculations
     df_analyzed = calculate_wind_components(df_merged)
+    df_final = calculate_normalized_stats(df_analyzed)
 
-    # Calculate Relative Score
-    df_analyzed['Rel_Score'] = df_analyzed['Avg_Score'] - df_analyzed['Par']
-
-    # 4. Save merged data
+    # Save CSV
     csv_filename = "pebble_beach_scoring_history.csv"
-    df_analyzed.to_csv(csv_filename, index=False)
+    df_final.to_csv(csv_filename, index=False)
     print(f"Data saved to {csv_filename}")
 
-    # 5. Generate Visualizations & Analysis
-    analyze_impact(df_analyzed)
+    # Visualizations
+    generate_visualizations(df_final)
 
-def analyze_impact(df):
+def generate_visualizations(df):
     if df.empty:
         return
 
-    # Correlation Analysis
-    cols_to_corr = ['Wind_mph', 'Temp_F', 'Condition_Index', 'Headwind_Comp', 'Crosswind_Comp', 'Rel_Score']
-    correlation = df[cols_to_corr].corr()
-    print("\nCorrelation Matrix (Weather Vectors vs Score):")
-    print(correlation['Rel_Score'].sort_values(ascending=False))
-
-    # 1. Round-by-Round Fluctuation Heatmap
     df['Year_Round'] = df['Year'].astype(str) + " - R" + df['Round'].astype(str)
-    pivot_fluctuation = df.pivot(index="Year_Round", columns="Hole", values="Rel_Score")
 
+    # 1. Original Rel Score Heatmap (Raw Difficulty)
+    pivot_raw = df.pivot(index="Year_Round", columns="Hole", values="Rel_Score")
     plt.figure(figsize=(14, 8))
-    sns.heatmap(pivot_fluctuation, cmap="RdBu_r", center=0, annot=True, fmt=".2f",
+    sns.heatmap(pivot_raw, cmap="RdBu_r", center=0, annot=True, fmt=".2f",
                 cbar_kws={'label': 'Avg Score Relative to Par'})
-    plt.title("Pebble Beach Scoring Difficulty (Avg - Par) by Round (2023-2025)")
+    plt.title("Pebble Beach Scoring Difficulty (Avg - Par) by Round")
     plt.xlabel("Hole Number")
     plt.ylabel("Round")
     plt.tight_layout()
     plt.savefig("scoring_fluctuation_heatmap.png")
-    print("Saved scoring_fluctuation_heatmap.png")
 
-    # 2. Headwind vs Score
-    plt.figure(figsize=(10, 6))
-    sns.regplot(x='Headwind_Comp', y='Rel_Score', data=df, scatter_kws={'alpha':0.5}, line_kws={'color':'red'})
-    plt.title("Impact of Headwind Component on Score")
-    plt.xlabel("Headwind Component (mph) [+ = Headwind, - = Tailwind]")
-    plt.ylabel("Avg Score Relative to Par")
+    # 2. Normalized Deviation Heatmap
+    # Highlight "Playing Easier/Harder than Normal"
+    pivot_norm = df.pivot(index="Year_Round", columns="Hole", values="Normalized_Deviation")
+    plt.figure(figsize=(14, 8))
+    # Red = Harder than expected, Blue = Easier than expected
+    sns.heatmap(pivot_norm, cmap="RdBu_r", center=0, annot=True, fmt=".2f",
+                cbar_kws={'label': 'Deviation from Expected Performance'})
+    plt.title("Normalized Hole Performance (Adjusted for Hole Avg & Daily Conditions)")
+    plt.xlabel("Hole Number")
+    plt.ylabel("Round")
     plt.tight_layout()
-    plt.savefig("headwind_impact.png")
-    print("Saved headwind_impact.png")
+    plt.savefig("normalized_scoring_heatmap.png")
 
-    # 3. Crosswind vs Score
-    plt.figure(figsize=(10, 6))
-    sns.regplot(x='Crosswind_Comp', y='Rel_Score', data=df, scatter_kws={'alpha':0.5}, line_kws={'color':'purple'})
-    plt.title("Impact of Crosswind Component on Score")
-    plt.xlabel("Crosswind Component (mph) [Absolute Value]")
-    plt.ylabel("Avg Score Relative to Par")
+    # 3. Birdie or Better % Heatmap
+    pivot_birdie = df.pivot(index="Year_Round", columns="Hole", values="Birdie_Better_Pct")
+    plt.figure(figsize=(14, 8))
+    sns.heatmap(pivot_birdie, cmap="Greens", annot=True, fmt=".1f",
+                cbar_kws={'label': 'Birdie or Better %'})
+    plt.title("Birdie or Better Percentage by Round")
+    plt.xlabel("Hole Number")
+    plt.ylabel("Round")
     plt.tight_layout()
-    plt.savefig("crosswind_impact.png")
-    print("Saved crosswind_impact.png")
+    plt.savefig("birdie_better_heatmap.png")
 
-    # 4. Wind Speed vs Score (General)
-    plt.figure(figsize=(10, 6))
-    sns.regplot(x='Wind_mph', y='Rel_Score', data=df, scatter_kws={'alpha':0.5}, line_kws={'color':'blue'})
-    plt.title("Impact of Total Wind Speed on Score")
-    plt.xlabel("Wind Speed (mph)")
-    plt.ylabel("Avg Score Relative to Par")
+    # 4. Bogey or Worse % Heatmap
+    pivot_bogey = df.pivot(index="Year_Round", columns="Hole", values="Bogey_Worse_Pct")
+    plt.figure(figsize=(14, 8))
+    sns.heatmap(pivot_bogey, cmap="Reds", annot=True, fmt=".1f",
+                cbar_kws={'label': 'Bogey or Worse %'})
+    plt.title("Bogey or Worse Percentage by Round")
+    plt.xlabel("Hole Number")
+    plt.ylabel("Round")
     plt.tight_layout()
-    plt.savefig("wind_vs_score.png")
-    print("Saved wind_vs_score.png")
+    plt.savefig("bogey_worse_heatmap.png")
+
+    print("Saved all visualizations.")
 
 if __name__ == "__main__":
     asyncio.run(main())
