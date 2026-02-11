@@ -8,26 +8,52 @@ import re
 import matplotlib.pyplot as plt
 import seaborn as sns
 import io
+import numpy as np
 
 # Constants
 YEARS = [2023, 2024, 2025]
 TOURNAMENT_NAME = "att-pebble-beach-pro-am"
 BASE_URL = "https://www.pgatour.com/tournaments/{year}/{tournament_name}/R{year}005/course-stats"
 
-# Weather Data (Hardcoded)
+# Weather Data with Wind Direction (Degrees)
 # Condition_Index: 1=Dry, 2=Damp, 3=Wet
-WEATHER_CSV = """Year,Round,Wind_mph,Temp_F,Condition_Index
-2023,1,10,55,1
-2023,2,12,55,2
-2023,3,20,55,1
-2023,4,15,52,3
-2024,1,25,59,3
-2024,2,25,56,3
-2024,3,8,55,2
-2025,1,9,53,1
-2025,2,8,55,1
-2025,3,15,57,3
-2025,4,15,55,3"""
+# Wind_Dir_Deg: 0=N, 90=E, 180=S, 270=W
+WEATHER_CSV = """Year,Round,Wind_mph,Temp_F,Condition_Index,Wind_Dir_Deg
+2023,1,10,55,1,290
+2023,2,12,55,2,270
+2023,3,20,55,1,180
+2023,4,15,52,3,290
+2024,1,25,59,3,160
+2024,2,25,56,3,160
+2024,3,8,55,2,270
+2025,1,9,53,1,315
+2025,2,8,55,1,315
+2025,3,15,57,3,180
+2025,4,15,55,3,225"""
+
+# Estimated Hole Azimuths (Tee -> Green Direction in Degrees)
+# Based on course orientation:
+# 1-3 Inland/West, 4-10 South/Ocean, 11-16 Inland/North/West, 17 West, 18 North along ocean
+HOLE_AZIMUTHS = {
+    1: 110,  # Inland East
+    2: 290,  # Back West
+    3: 270,  # West
+    4: 180,  # South along ocean
+    5: 0,    # North uphill
+    6: 180,  # South along ocean
+    7: 180,  # South downhill to ocean
+    8: 180,  # South along cliff
+    9: 180,  # South along cliff
+    10: 180, # South along cliff
+    11: 45,  # Northeast inland
+    12: 270, # West par 3
+    13: 0,   # North
+    14: 90,  # East par 5
+    15: 180, # South
+    16: 270, # West
+    17: 270, # West to ocean
+    18: 340  # Northwest along ocean
+}
 
 def load_weather_data():
     return pd.read_csv(io.StringIO(WEATHER_CSV))
@@ -144,6 +170,43 @@ def parse_current_table(html, year, round_num):
                 continue
     return rows
 
+def calculate_wind_components(df):
+    """
+    Calculates Headwind and Crosswind components.
+    Headwind: Wind blowing INTO the hole direction (Positive). Tailwind is Negative.
+    Crosswind: Wind blowing across the hole (Absolute value, as left/right both hurt).
+
+    Headwind = Speed * cos(WindDir - HoleDir)
+    Crosswind = Speed * |sin(WindDir - HoleDir)|
+    Note: Directions are in degrees. Math requires radians.
+    """
+
+    # Add Hole Azimuth
+    df['Hole_Azimuth'] = df['Hole'].map(HOLE_AZIMUTHS)
+
+    # Calculate Angle Difference (Wind From - Hole To)
+    # Wind Direction is "Coming From". Hole Direction is "Going To".
+    # Headwind occurs when Wind From (e.g. North 0) meets Hole To (North 0).
+    # Wait: Wind Direction "North" usually means blowing FROM North (0 deg) TO South (180 deg).
+    # If a hole plays North (0 deg), a North Wind is a HEADWIND.
+    # So we want the component of the wind vector opposite to the hole vector?
+    # No, Wind Vector direction is (Wind_Dir + 180).
+    # Easier: Angle between "Wind From" and "Hole To".
+    # If Wind From 0 (North) and Hole To 0 (North), angle diff is 0. Ideally this is Headwind.
+    # cos(0) = 1. So Speed * cos(diff) = Positive Headwind. Correct.
+    # If Wind From 180 (South) and Hole To 0 (North), angle diff is 180.
+    # cos(180) = -1. Tailwind. Correct.
+
+    # Convert to radians
+    # Merge HOLE_AZIMUTHS into dataframe first
+    df['Hole_Azimuth'] = df['Hole'].map(HOLE_AZIMUTHS)
+    df['Angle_Diff_Rad'] = np.radians(df['Wind_Dir_Deg'] - df['Hole_Azimuth'])
+
+    df['Headwind_Comp'] = df['Wind_mph'] * np.cos(df['Angle_Diff_Rad'])
+    df['Crosswind_Comp'] = df['Wind_mph'] * np.abs(np.sin(df['Angle_Diff_Rad']))
+
+    return df
+
 async def main():
     # 1. Fetch Scoring Data
     all_data = []
@@ -161,25 +224,28 @@ async def main():
     df_weather = load_weather_data()
     df_merged = pd.merge(df_scores, df_weather, on=["Year", "Round"], how="left")
 
-    # Calculate Relative Score
-    df_merged['Rel_Score'] = df_merged['Avg_Score'] - df_merged['Par']
+    # 3. Calculate Wind Components
+    df_analyzed = calculate_wind_components(df_merged)
 
-    # 3. Save merged data
+    # Calculate Relative Score
+    df_analyzed['Rel_Score'] = df_analyzed['Avg_Score'] - df_analyzed['Par']
+
+    # 4. Save merged data
     csv_filename = "pebble_beach_scoring_history.csv"
-    df_merged.to_csv(csv_filename, index=False)
+    df_analyzed.to_csv(csv_filename, index=False)
     print(f"Data saved to {csv_filename}")
 
-    # 4. Generate Visualizations & Analysis
-    analyze_impact(df_merged)
+    # 5. Generate Visualizations & Analysis
+    analyze_impact(df_analyzed)
 
 def analyze_impact(df):
     if df.empty:
         return
 
     # Correlation Analysis
-    cols_to_corr = ['Wind_mph', 'Temp_F', 'Condition_Index', 'Rel_Score']
+    cols_to_corr = ['Wind_mph', 'Temp_F', 'Condition_Index', 'Headwind_Comp', 'Crosswind_Comp', 'Rel_Score']
     correlation = df[cols_to_corr].corr()
-    print("\nCorrelation Matrix (Weather vs Score):")
+    print("\nCorrelation Matrix (Weather Vectors vs Score):")
     print(correlation['Rel_Score'].sort_values(ascending=False))
 
     # 1. Round-by-Round Fluctuation Heatmap
@@ -196,40 +262,35 @@ def analyze_impact(df):
     plt.savefig("scoring_fluctuation_heatmap.png")
     print("Saved scoring_fluctuation_heatmap.png")
 
-    # 2. Wind vs Avg Score (Scatter with Regression)
+    # 2. Headwind vs Score
     plt.figure(figsize=(10, 6))
-    sns.regplot(x='Wind_mph', y='Rel_Score', data=df, scatter_kws={'alpha':0.5}, line_kws={'color':'red'})
-    plt.title("Impact of Wind Speed on Average Score (Relative to Par)")
+    sns.regplot(x='Headwind_Comp', y='Rel_Score', data=df, scatter_kws={'alpha':0.5}, line_kws={'color':'red'})
+    plt.title("Impact of Headwind Component on Score")
+    plt.xlabel("Headwind Component (mph) [+ = Headwind, - = Tailwind]")
+    plt.ylabel("Avg Score Relative to Par")
+    plt.tight_layout()
+    plt.savefig("headwind_impact.png")
+    print("Saved headwind_impact.png")
+
+    # 3. Crosswind vs Score
+    plt.figure(figsize=(10, 6))
+    sns.regplot(x='Crosswind_Comp', y='Rel_Score', data=df, scatter_kws={'alpha':0.5}, line_kws={'color':'purple'})
+    plt.title("Impact of Crosswind Component on Score")
+    plt.xlabel("Crosswind Component (mph) [Absolute Value]")
+    plt.ylabel("Avg Score Relative to Par")
+    plt.tight_layout()
+    plt.savefig("crosswind_impact.png")
+    print("Saved crosswind_impact.png")
+
+    # 4. Wind Speed vs Score (General)
+    plt.figure(figsize=(10, 6))
+    sns.regplot(x='Wind_mph', y='Rel_Score', data=df, scatter_kws={'alpha':0.5}, line_kws={'color':'blue'})
+    plt.title("Impact of Total Wind Speed on Score")
     plt.xlabel("Wind Speed (mph)")
     plt.ylabel("Avg Score Relative to Par")
     plt.tight_layout()
     plt.savefig("wind_vs_score.png")
     print("Saved wind_vs_score.png")
-
-    # 3. Temp vs Avg Score
-    plt.figure(figsize=(10, 6))
-    sns.regplot(x='Temp_F', y='Rel_Score', data=df, scatter_kws={'alpha':0.5}, line_kws={'color':'orange'})
-    plt.title("Impact of Temperature on Average Score")
-    plt.xlabel("Temperature (F)")
-    plt.ylabel("Avg Score Relative to Par")
-    plt.tight_layout()
-    plt.savefig("temp_vs_score.png")
-    print("Saved temp_vs_score.png")
-
-    # 4. Heatmap by Hole and Weather Condition (e.g. Low/High Wind)
-    # Categorize Wind: Low (<10), Medium (10-20), High (>20)
-    df['Wind_Cat'] = pd.cut(df['Wind_mph'], bins=[-1, 10, 20, 100], labels=['Low (<10mph)', 'Medium (10-20mph)', 'High (>20mph)'])
-
-    pivot_wind = df.pivot_table(index='Hole', columns='Wind_Cat', values='Rel_Score', aggfunc='mean')
-
-    plt.figure(figsize=(12, 8))
-    sns.heatmap(pivot_wind, annot=True, cmap="Reds", fmt=".2f")
-    plt.title("Average Score Over Par by Hole and Wind Intensity")
-    plt.ylabel("Hole Number")
-    plt.xlabel("Wind Category")
-    plt.tight_layout()
-    plt.savefig("hole_wind_impact.png")
-    print("Saved hole_wind_impact.png")
 
 if __name__ == "__main__":
     asyncio.run(main())
