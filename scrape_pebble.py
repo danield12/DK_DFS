@@ -250,12 +250,45 @@ def generate_visualizations(df):
     # Append Wind Speed to the Label for Clarity
     df['Year_Round'] = df['Year'].astype(str) + " - R" + df['Round'].astype(str) + " (" + df['Wind_mph'].astype(str) + " mph)"
 
-    # 1. Original Rel Score Heatmap (Raw Difficulty)
+    # --- Helper to calculate relative wind arrow ---
+    def get_arrow(row):
+        # Wind Direction is "From". Hole Azimuth is "Towards".
+        # Wind Vector (Blowing Towards): (Wind_Dir + 180) % 360
+        # Relative Angle (Push Direction relative to Hole Direction):
+        # Rel = (Wind_Vec - Hole_Azimuth) % 360
+        wind_push_dir = (row['Wind_Dir_Deg'] + 180) % 360
+        rel_angle = (wind_push_dir - row['Hole_Azimuth']) % 360
+
+        # Map to 8 directions
+        if 337.5 <= rel_angle or rel_angle < 22.5:
+            return "↑"  # Tailwind (Pushing Forward)
+        elif 22.5 <= rel_angle < 67.5:
+            return "↗"  # Tail/Right
+        elif 67.5 <= rel_angle < 112.5:
+            return "→"  # Cross Right
+        elif 112.5 <= rel_angle < 157.5:
+            return "↘"  # Head/Right
+        elif 157.5 <= rel_angle < 202.5:
+            return "↓"  # Headwind (Pushing Backward)
+        elif 202.5 <= rel_angle < 247.5:
+            return "↙"  # Head/Left
+        elif 247.5 <= rel_angle < 292.5:
+            return "←"  # Cross Left
+        elif 292.5 <= rel_angle < 337.5:
+            return "↖"  # Tail/Left
+        return "?"
+
+    df['Wind_Arrow'] = df.apply(get_arrow, axis=1)
+    df['Annot_Label'] = df['Rel_Score'].round(2).astype(str) + "\n" + df['Wind_Arrow']
+
+    # 1. Original Rel Score Heatmap (Raw Difficulty) with Wind Arrows
     pivot_raw = df.pivot(index="Year_Round", columns="Hole", values="Rel_Score")
+    pivot_annot = df.pivot(index="Year_Round", columns="Hole", values="Annot_Label")
+
     plt.figure(figsize=(14, 8))
-    sns.heatmap(pivot_raw, cmap="RdBu_r", center=0, annot=True, fmt=".2f",
+    sns.heatmap(pivot_raw, cmap="RdBu_r", center=0, annot=pivot_annot, fmt="",
                 cbar_kws={'label': 'Avg Score Relative to Par'})
-    plt.title("Pebble Beach Scoring Difficulty (Avg - Par) by Round")
+    plt.title("Pebble Beach Scoring Difficulty (Avg - Par) & Wind Push Direction (Arrows)\n(↑ = Tailwind, ↓ = Headwind, ←/→ = Crosswind)")
     plt.xlabel("Hole Number")
     plt.ylabel("Round")
     plt.tight_layout()
