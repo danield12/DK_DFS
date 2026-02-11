@@ -4,35 +4,29 @@ from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 import time
 import os
+import re
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 # Constants
 YEARS = [2023, 2024, 2025]
 TOURNAMENT_NAME = "att-pebble-beach-pro-am"
-# Updated URL pattern based on 2025 finding
-# The tournament ID seems to be R{year}005. Let's verify if it's consistent.
-# 2025: R2025005
-# 2024: R2024005 (assumed)
-# 2023: R2023005 (assumed)
+# ID Mapping if needed, but R{year}005 seems consistent
 BASE_URL = "https://www.pgatour.com/tournaments/{year}/{tournament_name}/R{year}005/course-stats"
 
 def get_url(year):
     return BASE_URL.format(year=year, tournament_name=TOURNAMENT_NAME)
 
-async def fetch_html(year):
+async def fetch_and_parse_rounds(year):
     url = get_url(year)
     print(f"Fetching data for {year} from {url}...")
 
+    rows = []
+
     async with async_playwright() as p:
-        # Use a realistic user agent
         browser = await p.chromium.launch(
             headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox"
-            ]
+            args=["--disable-blink-features=AutomationControlled"]
         )
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -42,61 +36,89 @@ async def fetch_html(year):
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-            # Wait for the table to appear
-            # The table seems to be rendered client-side or at least needs time
+            # Wait for initial load
             try:
                 await page.wait_for_selector("table", timeout=15000)
-                print("Table selector found.")
+                # Ensure Pebble Beach is selected
+                # Locate the course name text. It might be in a header or button.
+                # Based on previous check, we just look for the text in the page content
+                # If "Spyglass" is dominant, we might need to switch.
+                # But verification showed Pebble is default.
+                await page.wait_for_selector("text=Pebble Beach Golf Links", timeout=5000)
             except:
-                print("Table selector not found immediately, waiting a bit more...")
-                time.sleep(5)
+                print(f"Warning: 'Pebble Beach Golf Links' might not be active or table missing for {year}.")
 
-            # Scroll down to ensure lazy loaded content is present
-            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(2)
-            await page.evaluate("window.scrollTo(0, 0)")
-            time.sleep(1)
+            # Find all round buttons
+            # We look for buttons with text "Round <number>"
+            # using Playwright locator
+            round_buttons = page.locator("button", has_text=re.compile(r"^Round \d+$"))
+            count = await round_buttons.count()
+            print(f"Found {count} specific round buttons for {year}.")
 
-            content = await page.content()
-            return content
+            # We want to iterate them in order (Round 1, Round 2, ...)
+            # Extract text and handle
+            buttons_map = {}
+            for i in range(count):
+                txt = await round_buttons.nth(i).text_content()
+                match = re.search(r"Round (\d+)", txt)
+                if match:
+                    r_num = int(match.group(1))
+                    buttons_map[r_num] = round_buttons.nth(i)
+
+            sorted_rounds = sorted(buttons_map.keys())
+            print(f"Processing rounds: {sorted_rounds}")
+
+            for r_num in sorted_rounds:
+                btn = buttons_map[r_num]
+                print(f"  Clicking Round {r_num}...")
+                await btn.click()
+
+                # Wait for update.
+                # We can wait for the button to be 'active' if there's a class,
+                # or just wait a reasonable time for the table to refresh.
+                # Since we don't know the exact active class, we use sleep.
+                time.sleep(3)
+
+                # Verify we are still on Pebble Beach
+                content = await page.content()
+                if "Pebble Beach Golf Links" not in content:
+                    print("  Warning: Course might have changed! Checking for Spyglass...")
+                    if "Spyglass Hill" in content:
+                        print("  Detected Spyglass Hill. Attempting to switch back (Not implemented, skipping).")
+                        continue
+
+                # Scrape Table
+                round_rows = parse_current_table(content, year, r_num)
+                if round_rows:
+                    print(f"  Extracted {len(round_rows)} rows for Round {r_num}.")
+                    rows.extend(round_rows)
+                else:
+                    print(f"  Failed to parse table for Round {r_num}.")
 
         except Exception as e:
             print(f"Error fetching {year}: {e}")
-            return None
         finally:
             await browser.close()
 
-def parse_html(html, year):
-    if not html:
-        return None
+    return rows
 
+def parse_current_table(html, year, round_num):
     soup = BeautifulSoup(html, 'html.parser')
 
-    # Verify course name
-    # We look for "Pebble Beach Golf Links" in the text near the table
-    # Or just ensure it's on the page and assume default behavior as verified
-    if "Pebble Beach Golf Links" not in soup.get_text():
-        print(f"Warning: 'Pebble Beach Golf Links' not found in page text for {year}. Skipping.")
-        return None
-
-    # Find the table
-    # Based on previous inspection, there is one table and it follows "Hole Stats"
-    # Or simply find the table with the specific headers
+    # Find the stats table
+    # We look for the table with "Hole" and "Par" headers
     tables = soup.find_all("table")
     target_table = None
 
     for table in tables:
         headers = [th.get_text(strip=True) for th in table.find_all("th")]
-        # Check for key columns
-        if "Hole" in str(headers) and "Par" in headers and "eagles" in headers:
+        if "Hole" in str(headers) and "Par" in str(headers):
             target_table = table
             break
 
     if not target_table:
-        print(f"Stats table not found for {year}.")
-        return None
+        return []
 
-    # Extract rows
     rows = []
     tbody = target_table.find("tbody")
     if tbody:
@@ -105,18 +127,17 @@ def parse_html(html, year):
             if not cols:
                 continue
 
-            # Columns mapping based on 2025 inspection:
-            # 0: Hole, 1: Par, 2: Yards, 3: Avg, 4: Rank, 5: +/-, 6: Eagles, 7: Birdies, 8: Pars, 9: Bogeys, 10: Dbl+
-            # We want: Year, Hole, Par, Avg_Score, Eagles, Birdies, Pars, Bogeys, Doubles
-
+            # Check for valid hole number (ignore "Out", "In", "Total")
             hole_val = cols[0]
-            # Skip summary rows (case-insensitive)
             if hole_val.strip().lower() in ["out", "in", "total"]:
                 continue
 
             try:
+                # Column mapping (0: Hole, 1: Par, 3: Avg, 6: Eagles, 7: Birdies, 8: Pars, 9: Bogeys, 10: Dbl+)
+                # Verify indices based on inspection
                 data = {
                     "Year": year,
+                    "Round": round_num,
                     "Hole": int(hole_val),
                     "Par": int(cols[1]),
                     "Avg_Score": float(cols[3]),
@@ -127,68 +148,52 @@ def parse_html(html, year):
                     "Doubles": int(cols[10])
                 }
                 rows.append(data)
-            except (ValueError, IndexError) as e:
-                print(f"Error parsing row for hole {hole_val}: {e}")
+            except (ValueError, IndexError):
                 continue
 
     return rows
 
 async def main():
     all_data = []
-
     for year in YEARS:
-        html = await fetch_html(year)
-        if html:
-            rows = parse_html(html, year)
-            if rows:
-                print(f"Extracted {len(rows)} rows for {year}.")
-                all_data.extend(rows)
-            else:
-                print(f"No data parsed for {year}.")
-        else:
-            print(f"Failed to fetch HTML for {year}.")
+        year_data = await fetch_and_parse_rounds(year)
+        all_data.extend(year_data)
 
     if not all_data:
         print("No data collected.")
         return
 
-    # Create DataFrame
     df = pd.DataFrame(all_data)
-
-    # Save to CSV
     csv_filename = "pebble_beach_scoring_history.csv"
     df.to_csv(csv_filename, index=False)
     print(f"Data saved to {csv_filename}")
 
-    # Visualization
-    generate_heatmap(df)
+    generate_visualization(df)
 
-def generate_heatmap(df):
+def generate_visualization(df):
     if df.empty:
         return
 
-    # Pivot data for heatmap: Holes vs Score Type (summed over years or average?)
-    # Requirement: "Holes vs. Score Type"
-    # Since we have 3 years, we can aggregate (sum) the counts for each hole.
+    # Create a Pivot Table for the Heatmap
+    # Y-Axis: "Year - Round", X-Axis: "Hole"
+    # Value: Avg_Score relative to Par (Avg - Par)
 
-    # Group by Hole and sum the counts
-    agg_df = df.groupby("Hole")[["Eagles", "Birdies", "Pars", "Bogeys", "Doubles"]].sum()
+    df['Rel_Score'] = df['Avg_Score'] - df['Par']
+    df['Year_Round'] = df['Year'].astype(str) + " - R" + df['Round'].astype(str)
 
-    # We can also calculate percentages if needed, but counts are fine.
-    # Requirement says "count or percentage". Let's do percentage for better visualization
-    # because the total shots per hole might vary.
+    pivot_df = df.pivot(index="Year_Round", columns="Hole", values="Rel_Score")
 
-    pct_df = agg_df.div(agg_df.sum(axis=1), axis=0) * 100
+    plt.figure(figsize=(14, 8))
+    sns.heatmap(pivot_df, cmap="RdBu_r", center=0, annot=True, fmt=".2f",
+                cbar_kws={'label': 'Avg Score Relative to Par'})
 
-    plt.figure(figsize=(12, 8))
-    sns.heatmap(pct_df, annot=True, fmt=".1f", cmap="YlGnBu", cbar_kws={'label': 'Percentage (%)'})
-    plt.title("Scoring Distribution by Hole - Pebble Beach Golf Links (2023-2025)")
-    plt.xlabel("Score Type")
-    plt.ylabel("Hole Number")
+    plt.title("Pebble Beach Scoring Difficulty (Avg - Par) by Round (2023-2025)")
+    plt.xlabel("Hole Number")
+    plt.ylabel("Round")
     plt.tight_layout()
 
-    plt.savefig("scoring_heatmap.png")
-    print("Heatmap saved to scoring_heatmap.png")
+    plt.savefig("scoring_fluctuation_heatmap.png")
+    print("Visualization saved to scoring_fluctuation_heatmap.png")
 
 if __name__ == "__main__":
     asyncio.run(main())

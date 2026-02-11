@@ -1,14 +1,14 @@
 # AT&T Pebble Beach Pro-Am Scoring History
 
-This project scrapes hole-by-hole scoring data for the **Pebble Beach Golf Links** course from the **AT&T Pebble Beach Pro-Am** tournament (2023, 2024, 2025).
+This project scrapes **round-level** hole-by-hole scoring data for the **Pebble Beach Golf Links** course from the **AT&T Pebble Beach Pro-Am** tournament (2023, 2024, 2025).
 
 ## Data Source
-The data is scraped from [PGATour.com](https://www.pgatour.com) using `playwright` to bypass CloudFront protection and render the dynamic Next.js application content.
+The data is scraped from [PGATour.com](https://www.pgatour.com) using `playwright` to interact with the Next.js application, select the correct course, and iterate through each round's data table.
 
 ## Files
-- `scrape_pebble.py`: The main script to scrape data, save CSV, and generate heatmap.
-- `pebble_beach_scoring_history.csv`: Aggregated scoring data for 3 years.
-- `scoring_heatmap.png`: Heatmap visualization of scoring distribution (percentage of Eagles, Birdies, Pars, Bogeys, Doubles).
+- `scrape_pebble.py`: Main script to scrape data, save CSV, and generate visualization.
+- `pebble_beach_scoring_history.csv`: Aggregated scoring data with `Year`, `Round`, `Hole`, and scoring metrics.
+- `scoring_fluctuation_heatmap.png`: Heatmap visualizing the fluctuation of average scores relative to par across rounds and years.
 - `requirements.txt`: Python dependencies.
 
 ## Usage
@@ -25,10 +25,10 @@ The data is scraped from [PGATour.com](https://www.pgatour.com) using `playwrigh
    ```
 
 3. **Output:**
-   - `pebble_beach_scoring_history.csv`
-   - `scoring_heatmap.png`
+   - `pebble_beach_scoring_history.csv` (Columns: Year, Round, Hole, Par, Avg_Score, Eagles, Birdies, Pars, Bogeys, Doubles)
+   - `scoring_fluctuation_heatmap.png`
 
-## Notes
-- The script automatically handles the default course selection (Pebble Beach Golf Links).
-- It verifies the page content before scraping.
-- The 2024 data reflects the shortened 54-hole tournament as aggregated by the official stats page.
+## Key Features
+- **Round-Level Granularity:** Captures data for each round (R1, R2, R3, R4) independently.
+- **Course Verification:** Ensures data is for "Pebble Beach Golf Links" even if other courses are played (e.g., Spyglass Hill).
+- **Handling Shortened Events:** Automatically detects available rounds (e.g., handles the 54-hole finish in 2024).
