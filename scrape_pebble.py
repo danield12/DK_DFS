@@ -19,17 +19,17 @@ BASE_URL = "https://www.pgatour.com/tournaments/{year}/{tournament_name}/R{year}
 # Wind_Dir_Deg: 0=N, 90=E, 180=S, 270=W
 # Note: Wind speeds are average "golf day" sustained winds.
 WEATHER_CSV = """Year,Round,Wind_mph,Temp_F,Wind_Dir_Deg
-2023,1,10,60,290
-2023,2,12,58,270
-2023,3,25,55,160
-2023,4,15,52,290
-2024,1,20,59,160
-2024,2,20,56,160
-2024,3,8,55,250
-2025,1,8,53,315
-2025,2,8,55,315
-2025,3,18,57,180
-2025,4,15,55,200"""
+2023,1,12,52,300
+2023,2,8,55,290
+2023,3,25,50,160
+2023,4,12,55,270
+2024,1,10,56,225
+2024,2,12,54,270
+2024,3,10,55,225
+2025,1,8,60,315
+2025,2,10,58,300
+2025,3,15,55,225
+2025,4,18,54,200"""
 
 # Precise Azimuths (Tee -> Green Direction in Degrees)
 # Derived from ProVisualizer KML data
